@@ -41,8 +41,6 @@ func main() {
 	hintLabel := widget.NewLabel("")
 	inputEntry := widget.NewEntry()
 	inputEntry.SetPlaceHolder("Type your guess here...")
-
-	// Result label
 	resultLabel := widget.NewLabel("")
 
 	// Layout
@@ -54,37 +52,56 @@ func main() {
 		resultLabel,
 	)
 
-	// Timer, Hints, and Game Logic
-	timeLeft := 15
-	ticker := time.NewTicker(1 * time.Second)
-	hintTimer := time.NewTimer(5 * time.Second)
+	// Channels for communication
+	timerChannel := make(chan int)
+	hintChannel := make(chan string)
+	gameOverChannel := make(chan bool)
 
-	// Goroutine for handling game logic
+	// Timer Goroutine
+	go func() {
+		timeLeft := 15
+		for timeLeft > 0 {
+			select {
+			case <-gameOverChannel:
+				close(timerChannel)
+				return
+			default:
+				time.Sleep(1 * time.Second)
+				timeLeft--
+				timerChannel <- timeLeft
+			}
+		}
+		// Notify game over if time runs out
+		gameOverChannel <- true
+	}()
+
+	// Hint Goroutine
+	go func() {
+		time.Sleep(5 * time.Second)
+		hintChannel <- "Hint: Starts with '" + string(originalWord[0]) + "'"
+		time.Sleep(5 * time.Second)
+		hintChannel <- "Hint: Ends with '" + string(originalWord[len(originalWord)-1]) + "'"
+	}()
+
+	// UI Update Goroutine
 	go func() {
 		for {
 			select {
-			case <-ticker.C:
-				timeLeft--
+			case timeLeft := <-timerChannel:
 				timerLabel.SetText(fmt.Sprintf("⏳ Time Left: %ds", timeLeft))
-				if timeLeft == 0 {
-					ticker.Stop()
-					dialog.ShowInformation("Time's Up!", "The correct word was: "+originalWord, myWindow)
-					return
-				}
-
-			case <-hintTimer.C:
-				hintLabel.SetText("Hint: Starts with '" + string(originalWord[0]) + "'")
-				time.AfterFunc(5*time.Second, func() {
-					hintLabel.SetText("Hint: Ends with '" + string(originalWord[len(originalWord)-1]) + "'")
-				})
+			case hint := <-hintChannel:
+				hintLabel.SetText(hint)
+			case <-gameOverChannel:
+				dialog.ShowInformation("Time's Up!", "The correct word was: "+originalWord, myWindow)
+				return
 			}
 		}
 	}()
 
-	// User input handling
+	// User Input Handling
 	inputEntry.OnChanged = func(text string) {
 		if strings.EqualFold(text, originalWord) {
-			ticker.Stop()
+			gameOverChannel <- true
 			dialog.ShowInformation("Congratulations!", "🎉 You solved it!", myWindow)
 		}
 	}
